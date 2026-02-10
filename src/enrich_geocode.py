@@ -1,19 +1,10 @@
-from pyspark.sql import DataFrame
-from pyspark.sql.functions import col, when, lit
-from pyspark.sql.types import StructType, StructField, DoubleType
-from pyspark.sql import functions as F
-
 import requests
-
-
-def is_invalid_lat_lon(lat, lon) -> bool:
-    if lat is None or lon is None:
-        return True
-    return not (-90 <= float(lat) <= 90 and -180 <= float(lon) <= 180)
+from pyspark.sql import DataFrame
+from pyspark.sql import functions as F
+from pyspark.sql.types import DoubleType, StructType, StructField, StringType
 
 
 def geocode_opencage(query: str, api_key: str):
-    # query: адрес/город/строка из датасета (зависит от полей)
     url = "https://api.opencagedata.com/geocode/v1/json"
     resp = requests.get(
         url,
@@ -31,69 +22,72 @@ def geocode_opencage(query: str, api_key: str):
 
 def fix_missing_coordinates(restaurants: DataFrame, api_key: str) -> DataFrame:
     """
-    Assumes restaurants has columns:
-      - latitude, longitude
-      - and some location fields to build a query (e.g., address/city/country/name)
-    Adapt `query_col` creation to your dataset.
+    - Detect invalid coords: null or out of range
+    - Build a query string from likely columns (address/city/country/name)
+    - Distinct queries -> driver REST calls -> join back
     """
 
-    # Собери строку запроса (пример — подстрой под свои колонки датасета)
-    query_col = F.concat_ws(", ", F.col("address"), F.col("city"), F.col("country"))
-
-    # Отберём строки, где координаты плохие
-    invalid_df = restaurants.withColumn("query", query_col).withColumn(
-        "needs_geocode",
-        (col("latitude").isNull())
-        | (col("longitude").isNull())
-        | (col("latitude") < -90)
-        | (col("latitude") > 90)
-        | (col("longitude") < -180)
-        | (col("longitude") > 180),
+    # Собираем query из "типичных" колонок. Если их нет — concat_ws просто пропустит null.
+    query = F.concat_ws(
+        ", ", F.col("address"), F.col("city"), F.col("country"), F.col("name")
     )
 
-    # Чтобы не гонять REST на каждую строку: берём distinct query
+    df = restaurants.withColumn("query", query)
+
+    needs_geocode = (
+        F.col("latitude").isNull()
+        | F.col("longitude").isNull()
+        | (F.col("latitude") < F.lit(-90))
+        | (F.col("latitude") > F.lit(90))
+        | (F.col("longitude") < F.lit(-180))
+        | (F.col("longitude") > F.lit(180))
+    )
+
+    df = df.withColumn("needs_geocode", needs_geocode)
+
+    # Берём distinct query только там, где реально нужно
     distinct_queries = (
-        invalid_df.filter(col("needs_geocode")).select("query").distinct()
+        df.filter(F.col("needs_geocode") & (F.length(F.col("query")) > 0))
+        .select("query")
+        .distinct()
     )
 
-    # Собираем distinct query в driver (допустимо для домашки при небольшом объёме)
     queries = [r["query"] for r in distinct_queries.collect()]
 
-    mapping = {}
+    mapping_rows = []
     for q in queries:
         try:
             lat, lon = geocode_opencage(q, api_key)
         except Exception:
             lat, lon = None, None
-        mapping[q] = (lat, lon)
+        mapping_rows.append((q, lat, lon))
 
-    # Превращаем mapping в DataFrame и join обратно (Spark-friendly)
     spark = restaurants.sparkSession
     schema = StructType(
         [
-            StructField("query", F.StringType(), False),
+            StructField("query", StringType(), False),
             StructField("lat_fix", DoubleType(), True),
             StructField("lon_fix", DoubleType(), True),
         ]
     )
-    rows = [(q, mapping[q][0], mapping[q][1]) for q in mapping]
-    fixes_df = spark.createDataFrame(rows, schema=schema)
 
-    joined = (
-        invalid_df.join(fixes_df, on="query", how="left")
+    fixes_df = spark.createDataFrame(mapping_rows, schema=schema)
+
+    out = (
+        df.join(fixes_df, on="query", how="left")
         .withColumn(
             "latitude",
-            when(
-                col("needs_geocode") & col("lat_fix").isNotNull(), col("lat_fix")
-            ).otherwise(col("latitude")),
+            F.when(
+                F.col("needs_geocode") & F.col("lat_fix").isNotNull(), F.col("lat_fix")
+            ).otherwise(F.col("latitude")),
         )
         .withColumn(
             "longitude",
-            when(
-                col("needs_geocode") & col("lon_fix").isNotNull(), col("lon_fix")
-            ).otherwise(col("longitude")),
+            F.when(
+                F.col("needs_geocode") & F.col("lon_fix").isNotNull(), F.col("lon_fix")
+            ).otherwise(F.col("longitude")),
         )
         .drop("lat_fix", "lon_fix", "needs_geocode")
     )
 
-    return joined
+    return out
