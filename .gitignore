@@ -1,0 +1,86 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# =========================
+# PySpark / Spark
+# =========================
+spark-warehouse/
+metastore_db/
+derby.log
+*.crc
+
+# Spark logs
+logs/
+spark-logs/
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.*
+*.env
+
+# =========================
+# Docker
+# =========================
+*.log
+docker-compose.override.yml
+
+# =========================
+# Data / ETL artifacts
+# =========================
+data/*
+!data/.gitkeep
+
+# If you store raw datasets locally
+Dataset/
+restaurants/
+output/
+tmp/
+
+# =========================
+# PyCharm / IDE
+# =========================
+.idea/
+*.iml
+
+# =========================
+# OS (Windows / macOS / Linux)
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# Tests / Coverage
+# =========================
+.coverage
+htmlcov/
+.pytest_cache/
+
+# =========================
+# Misc
+# =========================
+*.swp
+*.bak
+*.tmp

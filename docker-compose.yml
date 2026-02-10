@@ -1,0 +1,32 @@
+version: "3.8"
+
+services:
+  spark-master:
+    image: apache/spark:3.5.1
+    container_name: spark-master
+    environment:
+      SPARK_MODE: "master"
+      OPENCAGE_API_KEY: ${OPENCAGE_API_KEY}
+
+    command: >
+      bash -c "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master &&
+               tail -f /dev/null"
+    volumes:
+      - ./app:/app
+      - ./data:/data
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+
+  spark-worker:
+    image: apache/spark:3.5.1
+    container_name: spark-worker
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      OPENCAGE_API_KEY: ${OPENCAGE_API_KEY}
+    depends_on:
+      - spark-master
+    volumes:
+      - ./app:/app
+      - ./data:/data
