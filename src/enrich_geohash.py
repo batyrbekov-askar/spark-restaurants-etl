@@ -13,6 +13,6 @@ def _geohash(lat, lon, precision: int) -> str:
         return None
 
 
-def add_geohash4(df: DataFrame, precision: int = 4) -> DataFrame:
+def add_geohash(df: DataFrame, precision: int = 4) -> DataFrame:
     gh_udf = udf(lambda lat, lon: _geohash(lat, lon, precision), StringType())
     return df.withColumn("geohash4", gh_udf(col("latitude"), col("longitude")))
